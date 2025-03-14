@@ -11,6 +11,13 @@ from .message import MessageRecv
 from .willing_manager import willing_manager
 from ..models.utils_model import LLM_request
 
+# 2023-12-10 修复follow-up系统只能运行一次的问题：
+# 1. 修改了evaluate_and_respond方法，只在需要回复或没有消息时才停用跟踪
+# 2. 修改了_tracking_task方法，只在跟踪器不活动时才清理
+# 3. 修改了should_continue_tracking方法，触发评估但不终止跟踪
+# 4. 添加了restart_tracking方法，在评估后重新启动跟踪
+# 5. 增加了更多日志记录点，便于调试
+
 class FollowUpTracker:
     """
     跟踪一个特定对话，收集后续消息并判断是否需要回复
@@ -31,15 +38,18 @@ class FollowUpTracker:
     
     def should_continue_tracking(self) -> bool:
         """判断是否应该继续跟踪"""
-        # 判断时间是否超时
-        if time.time() - self.start_time >= global_config.follow_up_timeout:
+        # 检查跟踪是否已被手动停用
+        if not self.active:
             return False
         
-        # 判断消息数量是否达到上限
-        if len(self.follow_up_messages) >= global_config.follow_up_max_messages:
+        # 判断是否应该触发评估（超时或达到消息数量上限）
+        if (time.time() - self.start_time >= global_config.follow_up_timeout or 
+            len(self.follow_up_messages) >= global_config.follow_up_max_messages):
+            # 达到评估条件，但不终止跟踪
             return False
             
-        return self.active
+        # 跟踪仍然活跃
+        return True
     
     def deactivate(self) -> None:
         """停止跟踪"""
@@ -64,8 +74,18 @@ class FollowUpTracker:
             # 设置意愿为高值，确保会回复
             willing_manager.set_willing(self.chat_stream.stream_id, 2.0)
             # 最后一条消息会通过正常的消息处理流程处理
-        
-        self.deactivate()
+            # 停用当前跟踪器，因为已经决定回复
+            self.deactivate()
+        else:
+            # 如果不需要回复但时间超时或消息数量达到上限，也停用跟踪器
+            if (time.time() - self.start_time >= global_config.follow_up_timeout or 
+                len(self.follow_up_messages) >= global_config.follow_up_max_messages):
+                logger.debug(f"[跟踪回复] 不需要回复，且超时或消息数量达到上限，停用跟踪器")
+                self.deactivate()
+            # 否则继续跟踪
+            else:
+                logger.debug(f"[跟踪回复] 不需要回复，继续跟踪 {self.chat_stream.stream_id} 的后续消息")
+                # 不停用跟踪器，继续收集消息
     
     def _build_context(self) -> str:
         """构建对话上下文"""
@@ -129,6 +149,7 @@ class FollowUpManager:
         
         # 如果已经在跟踪这个对话，先停止旧的跟踪
         if chat_stream.stream_id in self.trackers:
+            logger.info(f"[跟踪回复] 停止旧的跟踪任务 {chat_stream.stream_id}")
             self.stop_tracking(chat_stream.stream_id)
         
         # 创建新的跟踪器
@@ -138,7 +159,7 @@ class FollowUpManager:
         
         # 创建异步任务
         tracker.task = asyncio.create_task(self._tracking_task(chat_stream.stream_id))
-        logger.debug(f"[跟踪回复] 开始跟踪 {chat_stream.stream_id} 的对话")
+        logger.info(f"[跟踪回复] 开始跟踪 {chat_stream.stream_id} 的对话，消息ID: {message_id}，超时时间: {global_config.follow_up_timeout}秒")
     
     def stop_tracking(self, stream_id: str) -> None:
         """停止跟踪一个对话"""
@@ -155,9 +176,13 @@ class FollowUpManager:
             return
             
         stream_id = chat_stream.stream_id
-        if stream_id in self.trackers:
+        if stream_id in self.trackers and self.trackers[stream_id].active:
+            # 添加日志显示消息内容和追踪器状态
             self.trackers[stream_id].add_message(message)
-            logger.debug(f"[跟踪回复] 添加消息到 {stream_id} 的跟踪器")
+            logger.debug(f"[跟踪回复] 添加消息到 {stream_id} 的跟踪器，"
+                        f"当前消息数: {len(self.trackers[stream_id].follow_up_messages)}，" 
+                        f"内容: {message.processed_plain_text[:30]}..."
+                        f"追踪开始时间: {time.strftime('%H:%M:%S', time.localtime(self.trackers[stream_id].start_time))}")
     
     async def _tracking_task(self, stream_id: str) -> None:
         """跟踪任务，在超时或达到消息数量上限时评估并可能回复"""
@@ -172,9 +197,31 @@ class FollowUpManager:
         # 评估并可能回复
         await tracker.evaluate_and_respond()
         
-        # 清理
-        if stream_id in self.trackers and self.trackers[stream_id] == tracker:
+        # 只有在跟踪器已经不活动时才清理
+        if stream_id in self.trackers and self.trackers[stream_id] == tracker and not tracker.active:
+            logger.debug(f"[跟踪回复] 清理不活动的跟踪器 {stream_id}")
             self.stop_tracking(stream_id)
+        else:
+            # 如果跟踪器仍然活动，重置时间和评估状态
+            if stream_id in self.trackers and self.trackers[stream_id] == tracker:
+                logger.debug(f"[跟踪回复] 重启跟踪器 {stream_id}")
+                await self.restart_tracking(stream_id)
+    
+    async def restart_tracking(self, stream_id: str) -> None:
+        """重启跟踪，清空消息并重置开始时间"""
+        if stream_id in self.trackers:
+            tracker = self.trackers[stream_id]
+            if tracker.active:
+                # 保留跟踪器但重置状态
+                tracker.start_time = time.time()  # 重置开始时间
+                tracker.follow_up_messages = []  # 清空已收集的消息
+                
+                # 创建新的异步任务
+                if tracker.task:
+                    tracker.task.cancel()  # 取消旧任务
+                tracker.task = asyncio.create_task(self._tracking_task(stream_id))
+                
+                logger.debug(f"[跟踪回复] 重新开始跟踪 {stream_id} 的对话")
 
 # 创建全局实例
 follow_up_manager = FollowUpManager() 

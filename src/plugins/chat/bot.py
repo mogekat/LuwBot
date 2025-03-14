@@ -123,6 +123,8 @@ class ChatBot:
         await relationship_manager.update_relationship_value(chat_stream=chat, relationship_value=0.5)
 
         # 将消息添加到跟踪器（如果有活动的跟踪）
+        if chat.stream_id in follow_up_manager.trackers:
+            logger.info(f"[跟踪回复] 添加消息到 {chat.stream_id} 的跟踪器，当前跟踪器状态: 活动={follow_up_manager.trackers[chat.stream_id].active}，消息数量={len(follow_up_manager.trackers[chat.stream_id].follow_up_messages)}")
         follow_up_manager.add_message(chat, message)
 
         await message.process()
