@@ -105,6 +105,13 @@ class BotConfig:
         default_factory=lambda: ["表情包", "图片", "回复", "聊天记录"]
     )  # 添加新的配置项默认值
 
+    # 消息跟踪功能配置
+    follow_up_timeout = 30  # 跟踪超时时间（秒）
+    follow_up_max_messages = 10  # 跟踪最大消息数
+    follow_up_enabled = True  # 是否启用跟踪功能
+    follow_up_llm_prompt = "判断这段对话是否需要机器人继续回复。如果对话中有人明确针对机器人的回复提出了问题、请求、询问、反驳或是期待回应的言论，或机器人被提及（@、称呼名字等），请回答'是'，否则回答'否'。"
+    follow_up_llm: Dict[str, str] = field(default_factory=lambda: {})  # 消息跟踪功能使用的LLM模型
+
     @staticmethod
     def get_config_dir() -> str:
         """获取配置文件目录"""
@@ -228,6 +235,7 @@ class BotConfig:
                 "vlm",
                 "embedding",
                 "moderation",
+                "follow_up_llm",  # 添加消息跟踪功能使用的LLM模型
             ]
 
             for item in config_list:
@@ -290,6 +298,14 @@ class BotConfig:
             
             if config.INNER_VERSION in SpecifierSet(">=0.0.6"):
                 config.ban_msgs_regex = msg_config.get("ban_msgs_regex", config.ban_msgs_regex)
+
+            # 消息跟踪功能配置
+            if config.INNER_VERSION in SpecifierSet(">=0.0.8"):
+                config.follow_up_timeout = int(msg_config.get("follow_up_timeout", 30))
+                config.follow_up_max_messages = int(msg_config.get("follow_up_max_messages", 10))
+                config.follow_up_enabled = bool(msg_config.get("follow_up_enabled", True))
+                config.follow_up_llm_prompt = str(msg_config.get("follow_up_llm_prompt", 
+                    "判断这段对话是否需要机器人继续回复。如果对话中有人明确针对机器人的回复提出了问题、请求、询问、反驳或是期待回应的言论，或机器人被提及（@、称呼名字等），请回答'是'，否则回答'否'。"))
 
         def memory(parent: dict):
             memory_config = parent["memory"]

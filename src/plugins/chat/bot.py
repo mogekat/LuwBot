@@ -27,6 +27,7 @@ from .utils import calculate_typing_time, is_mentioned_bot_in_message
 from .utils_image import image_path_to_base64
 from .willing_manager import willing_manager  # 导入意愿管理器
 from .message_base import UserInfo, GroupInfo, Seg
+from .follow_up_manager import follow_up_manager  # 导入消息跟踪管理器
 
 
 class ChatBot:
@@ -120,6 +121,9 @@ class ChatBot:
             chat_stream=chat,
         )
         await relationship_manager.update_relationship_value(chat_stream=chat, relationship_value=0.5)
+
+        # 将消息添加到跟踪器（如果有活动的跟踪）
+        follow_up_manager.add_message(chat, message)
 
         await message.process()
         # 过滤词
@@ -293,6 +297,11 @@ class ChatBot:
             )
             # 使用情绪管理器更新情绪
             self.mood_manager.update_mood_from_emotion(emotion[0], global_config.mood_intensity_factor)
+
+            # 启动消息跟踪，跟踪后续消息
+            if global_config.follow_up_enabled:
+                follow_up_manager.start_tracking(chat, think_id)
+                logger.info(f"[消息跟踪] 开始跟踪 {chat.stream_id} 的后续消息")
 
             # willing_manager.change_reply_willing_after_sent(
             #     chat_stream=chat

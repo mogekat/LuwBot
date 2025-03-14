@@ -79,21 +79,37 @@ class ImageManager:
             description: 描述文本
             description_type: 描述类型 ('emoji' 或 'image')
         """
-        self.db.db.image_descriptions.update_one(
-            {'hash': image_hash, 'type': description_type},
-            {
-                '$set': {
+        try:
+            # 首先检查记录是否已存在
+            existing = self.db.db.image_descriptions.find_one({'hash': image_hash})
+            if existing:
+                # 如果存在则更新
+                self.db.db.image_descriptions.update_one(
+                    {'_id': existing['_id']},  # 使用_id作为唯一标识符更新
+                    {
+                        '$set': {
+                            'description': description,
+                            'type': description_type,
+                            'timestamp': int(time.time())
+                        }
+                    }
+                )
+            else:
+                # 如果不存在则插入
+                self.db.db.image_descriptions.insert_one({
+                    'hash': image_hash,
+                    'type': description_type,
                     'description': description,
                     'timestamp': int(time.time())
-                }
-            },
-            upsert=True
-        )
+                })
+        except Exception as e:
+            logger.error(f"保存图片描述到数据库失败: {str(e)}")
+            # 不抛出异常，以免中断流程
 
     async def save_image(self, 
                         image_data: Union[str, bytes], 
-                        url: str = None, 
-                        description: str = None, 
+                        url: Optional[str] = None, 
+                        description: Optional[str] = None, 
                         is_base64: bool = False) -> Optional[str]:
         """保存图像
         Args:
@@ -349,12 +365,12 @@ class ImageManager:
 image_manager = ImageManager()
 
 
-def image_path_to_base64(image_path: str) -> str:
-    """将图片路径转换为base64编码
+def image_path_to_base64(image_path: str) -> Optional[str]:
+    """将图片文件转换为base64编码
     Args:
         image_path: 图片文件路径
     Returns:
-        str: base64编码的图片数据
+        Optional[str]: base64编码的图片数据，失败时返回None
     """
     try:
         with open(image_path, 'rb') as f:

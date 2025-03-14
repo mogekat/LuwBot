@@ -7,7 +7,7 @@ WORKDIR /MaiMBot
 COPY requirements.txt .
 
 # 安装依赖（这层会被缓存直到requirements.txt改变）
-RUN pip install --upgrade -r requirements.txt
+RUN pip install --upgrade -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 # 然后复制项目代码
 COPY . .

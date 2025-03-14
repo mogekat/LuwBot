@@ -20,6 +20,7 @@ from .chat_stream import chat_manager
 from ..memory_system.memory import hippocampus, memory_graph
 from .bot import ChatBot
 from .message_sender import message_manager, message_sender
+from .follow_up_manager import follow_up_manager  # 导入消息跟踪管理器
 
 
 # 创建LLM统计实例
@@ -101,6 +102,7 @@ async def _(bot: Bot):
     logger.success("-----------开始偷表情包！-----------")
     asyncio.create_task(chat_manager._initialize())
     asyncio.create_task(chat_manager._auto_save_task())
+    logger.success("-----------消息跟踪管理器已启动！-----------")
 
 
 @msg_in.handle()

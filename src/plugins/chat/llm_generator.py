@@ -39,7 +39,7 @@ class ResponseGenerator:
 
     async def generate_response(
         self, message: MessageThinking
-    ) -> Optional[Union[str, List[str]]]:
+    ) -> Tuple[Optional[List[str]], Optional[str]]:
         """根据当前模型类型选择对应的生成函数"""
         # 从global_config中获取模型概率值并选择模型
         rand = random.random()
@@ -68,9 +68,9 @@ class ResponseGenerator:
         
         if model_response:
             logger.info(f'{global_config.BOT_NICKNAME}的回复是：{model_response}')
-            model_response = await self._process_response(model_response)
-            if model_response:
-                return model_response, raw_content
+            processed_response = await self._process_response(model_response)
+            if processed_response:
+                return processed_response, raw_content
         return None, raw_content
 
     async def _generate_response_with_model(
@@ -197,16 +197,26 @@ class ResponseGenerator:
             print(f"获取情感标签时出错: {e}")
             return ["neutral"]
 
-    async def _process_response(self, content: str) -> Tuple[List[str], List[str]]:
-        """处理响应内容，返回处理后的内容和情感标签"""
+    async def _process_response(self, content: str) -> List[str]:
+        """处理响应内容，返回处理后的内容"""
         if not content:
-            return None, []
+            return []
 
         processed_response = process_llm_response(content)
         
         # print(f"得到了处理后的llm返回{processed_response}")
 
         return processed_response
+
+    async def generate_text(self, prompt: str) -> str:
+        """生成简单的文本回复，用于判断是否需要回复消息"""
+        try:
+            # 直接使用model_v25，不依赖外部model_register
+            response, _ = await self.model_v25.generate_response(prompt)
+            return response
+        except Exception as e:
+            logger.error(f"[文本生成] 生成简单文本失败: {e}")
+            return ""
 
 
 class InitiativeMessageGenerate:

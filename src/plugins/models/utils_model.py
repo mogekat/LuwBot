@@ -229,22 +229,25 @@ class LLM_request:
                                         if flag_delta_content_finished:
                                             usage = chunk.get("usage", None) # 获取tokn用量
                                         else:
-                                            delta = chunk["choices"][0]["delta"]
-                                            delta_content = delta.get("content")
-                                            if delta_content is None:
-                                                delta_content = ""
-                                            accumulated_content += delta_content
-                                            # 检测流式输出文本是否结束
-                                            finish_reason =  chunk["choices"][0]["finish_reason"]
-                                            if finish_reason == "stop":
-                                                usage = chunk.get("usage", None)
-                                                if usage:
-                                                    break
-                                                # 部分平台在文本输出结束前不会返回token用量，此时需要再获取一次chunk
-                                                flag_delta_content_finished = True
-                                            
-                                    except Exception:
-                                        logger.exception("解析流式输出错误")
+                                            # 安全获取choices和delta
+                                            choices = chunk.get("choices", [])
+                                            if choices and len(choices) > 0:
+                                                choice = choices[0]
+                                                delta = choice.get("delta", {})
+                                                delta_content = delta.get("content", "")
+                                                accumulated_content += delta_content
+                                                # 检测流式输出文本是否结束，使用get方法安全获取finish_reason
+                                                finish_reason = choice.get("finish_reason")
+                                                if finish_reason == "stop":
+                                                    usage = chunk.get("usage", None)
+                                                    if usage:
+                                                        break
+                                                    # 部分平台在文本输出结束前不会返回token用量，此时需要再获取一次chunk
+                                                    flag_delta_content_finished = True
+                                            else:
+                                                logger.debug(f"流式输出中没有choices字段或为空: {data_str}")
+                                    except Exception as e:
+                                        logger.exception(f"解析流式输出错误: {e}, 当前chunk数据: {data_str}")
                             content = accumulated_content
                             reasoning_content = ""
                             think_match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
